@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.statespace.sarimax import SARIMAX
+from pmdarima import auto_arima
 import streamlit as st
 
 st.title('Chocolate Shop Sales Forecasting')
-st.write('This app uses a SARIMA(1,1,1)(1,0,1,52) model to forecast weekly sales for a chocolate shop.')
+st.write('This app uses an auto-selected ARIMA model to forecast weekly sales for a chocolate shop.')
 
 uploaded_file = st.file_uploader('Upload your sales data CSV file', type='csv')
 
@@ -30,10 +31,10 @@ if uploaded_file is not None:
     train = data.iloc[:104]
     test = data.iloc[104:]
     
-    # Fit SARIMA model on train
+    # Fit auto_arima model on train
     try:
-        model = SARIMAX(train['sales'], order=(1,1,1), seasonal_order=(1,0,1,52))
-        fitted_model = model.fit()
+        model = auto_arima(train['sales'], seasonal=True, m=52, trace=True, error_action='ignore', suppress_warnings=True)
+        fitted_model = model.fit(train['sales'])
         
         # Predict test set
         predictions = fitted_model.forecast(steps=len(test))
@@ -42,23 +43,39 @@ if uploaded_file is not None:
         rmse = np.sqrt(np.mean((test['sales'] - predictions)**2))
         st.write(f'Root Mean Squared Error on test set: {rmse:.2f}')
         
-        # Fit model on full data
-        full_model = SARIMAX(data['sales'], order=(1,1,1), seasonal_order=(1,0,1,52))
-        full_fitted_model = full_model.fit()
+        # Fit auto_arima on full data
+        full_model = auto_arima(data['sales'], seasonal=True, m=52, trace=True, error_action='ignore', suppress_warnings=True)
+        full_fitted_model = full_model.fit(data['sales'])
         
-        # Forecast next 52 weeks
-        forecast = full_fitted_model.forecast(steps=52)
+        # Forecast next 10 weeks with confidence intervals (95%)
+        forecast_dict = full_fitted_model.predict(n_periods=10, return_conf_int=True, alpha=0.05)
+        forecast = forecast_dict[0]
+        conf_int = forecast_dict[1]
         
         # Allow user to select week
-        week = st.slider('Select week number (1-52) for the upcoming year', 1, 52)
-        st.write(f'Predicted sales for week {week}: {forecast[week-1]:.2f}')
+        week = st.slider('Select week number (1-10) for the upcoming period', 1, 10)
+        pred_value = forecast.iloc[week-1]
+        lower_ci = conf_int[week-1, 0]
+        upper_ci = conf_int[week-1, 1]
+        st.write(f'Predicted sales for week {week}: {pred_value:.2f} (95% CI: [{lower_ci:.2f}, {upper_ci:.2f}])')
         
-        # Plot historical data and forecast
+        # Prepare data for plotting with confidence intervals
+        forecast_dates = pd.date_range(start=data.index[-1], periods=11, freq='W')[1:]
+        forecast_df = pd.DataFrame({
+            'date': forecast_dates,
+            'forecast': forecast,
+            'lower_ci': conf_int[:, 0],
+            'upper_ci': conf_int[:, 1]
+        })
+        
+        # Plot historical data and forecast with confidence intervals
         st.write('Historical Sales:')
         st.line_chart(data['sales'])
-        st.write('Forecast for the next 52 weeks:')
-        st.line_chart(forecast)
+        st.write('Forecast for the next 10 weeks with 95% Confidence Interval:')
+        fig_data = pd.concat([data['sales'], forecast_df.set_index('date')['forecast']])
+        st.line_chart(fig_data)
+        st.line_chart(forecast_df.set_index('date')[['lower_ci', 'upper_ci']], color=['#ff9999', '#ff9999'], alpha=0.3)  # Shaded CI
     except Exception as e:
-        st.error(f'Error fitting SARIMA model: {str(e)}')
+        st.error(f'Error fitting auto_arima model: {str(e)}')
 else:
     st.write('Please upload a CSV file with columns "date" (in YYYY-MM-DD format) and "sales" (numeric).')

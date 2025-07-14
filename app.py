@@ -1,6 +1,10 @@
+import streamlit as st
+
+# ✅ Fix the Hugging Face Spaces crash by disabling usage stats
+st.set_option("browser.gatherUsageStats", False)
+
 import pandas as pd
 import numpy as np
-import streamlit as st
 import plotly.graph_objects as go
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
@@ -139,134 +143,5 @@ with tabs[1]:
     mae = mean_absolute_error(test["sales"], test_forecast_rounded)
     mape = np.mean(np.abs((test["sales"] - test_forecast_rounded) / test["sales"])) * 100
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("R²", f"{r2:.3f}")
-    col2.metric("RMSE", f"{rmse:.2f}")
-    col3.metric("MAE", f"{mae:.2f}")
-    col4.metric("MAPE", f"{mape:.2f}%")
+    col1, col2, col
 
-    # Plotly Actual vs Forecast
-    fig_eval = go.Figure()
-    fig_eval.add_trace(go.Scatter(
-        x=test.index, y=test["sales"],
-        mode="lines", name="Actual Sales", line=dict(color="black")
-    ))
-    fig_eval.add_trace(go.Scatter(
-        x=test_forecast_rounded.index, y=test_forecast_rounded,
-        mode="lines", name="Forecasted Sales", line=dict(color="blue")
-    ))
-    fig_eval.add_trace(go.Scatter(
-        x=list(test_forecast_rounded.index) + list(test_forecast_rounded.index[::-1]),
-        y=list(test_conf_int_rounded.iloc[:, 0]) + list(test_conf_int_rounded.iloc[:, 1][::-1]),
-        fill="toself",
-        fillcolor="rgba(0,0,255,0.2)",
-        line=dict(color="rgba(255,255,255,0)"),
-        hoverinfo="skip",
-        name="90% Confidence Interval"
-    ))
-    fig_eval.update_layout(
-        title="Forecast vs Actual Sales (2024)",
-        xaxis_title="Week",
-        yaxis_title="Sales ($)",
-        hovermode="x unified"
-    )
-    st.plotly_chart(fig_eval, use_container_width=True)
-
-# ------------------------------ Tab 3: Residual Diagnostics ------------------------------
-with tabs[2]:
-    st.subheader("Residual Diagnostics")
-    residuals = model_fit.resid
-
-    fig_resid = go.Figure()
-    fig_resid.add_trace(go.Scatter(x=train.index, y=residuals, mode="lines", name="Residuals"))
-    fig_resid.update_layout(title="Residuals Over Time", xaxis_title="Date", yaxis_title="Residual")
-    st.plotly_chart(fig_resid, use_container_width=True)
-
-    st.subheader("Residual Distribution")
-    fig_hist, ax_hist = plt.subplots(figsize=(8, 4))
-    ax_hist.hist(residuals, bins=20, edgecolor="k", alpha=0.7)
-    ax_hist.set_title("Histogram of Residuals")
-    ax_hist.set_xlabel("Residual")
-    ax_hist.set_ylabel("Frequency")
-    st.pyplot(fig_hist)
-
-    fig_qq, ax_qq = plt.subplots(figsize=(6, 6))
-    import scipy.stats as stats
-    stats.probplot(residuals, dist="norm", plot=ax_qq)
-    ax_qq.set_title("Q-Q Plot of Residuals")
-    st.pyplot(fig_qq)
-
-    fig_acf, ax_acf = plt.subplots(figsize=(10, 4))
-    plot_acf(residuals, ax=ax_acf, lags=40)
-    ax_acf.set_title("Autocorrelation (ACF) of Residuals")
-    st.pyplot(fig_acf)
-
-# ------------------------------ Tab 4: Historical Sales ------------------------------
-with tabs[3]:
-    st.subheader("Historical Weekly Sales")
-
-    fig_hist_sales = go.Figure()
-    fig_hist_sales.add_trace(go.Scatter(
-        x=df.index,
-        y=df["sales"],
-        mode="lines",
-        name="Historical Sales",
-        line=dict(color="black")
-    ))
-    fig_hist_sales.update_layout(
-        title="All-Time Weekly Chocolate Sales",
-        xaxis_title="Date",
-        yaxis_title="Sales ($)",
-        hovermode="x unified"
-    )
-    st.plotly_chart(fig_hist_sales, use_container_width=True)
-
-    st.subheader("Look Up Actual Sales for a Past Week")
-    historical_date = st.date_input(
-        "Choose a date to view historical sales:",
-        min_value=df.index.min().date(),
-        max_value=df.index.max().date(),
-        value=df.index[-1].date(),
-        key="history_date"
-    )
-    historical_date = pd.to_datetime(historical_date)
-
-    if historical_date not in df.index:
-        st.warning("Selected date is not in the dataset.")
-    else:
-        actual_sales = df.loc[historical_date, "sales"]
-        st.metric("Actual Sales", f"{actual_sales:.2f}")
-
-# ------------------------------ Footer ------------------------------
-st.markdown("""
-<style>
-.footer {
-    position: relative;
-    bottom: 0;
-    width: 100%;
-    background-color: #f0f2f6;
-    padding: 10px 20px;
-    font-size: 0.9em;
-    color: #555555;
-    text-align: center;
-    border-top: 1px solid #d3d3d3;
-    margin-top: 20px;
-}
-.footer a {
-    color: #1a73e8;
-    text-decoration: none;
-    margin: 0 8px;
-}
-.footer a:hover {
-    text-decoration: underline;
-}
-</style>
-
-<div class="footer">
-    &copy; 2024 The Forecast Company. All Rights Reserved.  
-    <br>
-    Contact Us: 
-    <a href="tel:+18563040922">856-304-0922</a> | 
-    <a href="mailto:theforecastcompany@gmail.com">theforecastcompany@gmail.com</a>
-</div>
-""", unsafe_allow_html=True)

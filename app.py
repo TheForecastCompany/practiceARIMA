@@ -1,6 +1,12 @@
+import os
+
+# Fix permission error by setting Streamlit config dir to home
+os.environ["STREAMLIT_CONFIG_DIR"] = os.path.join(os.path.expanduser("~"), ".streamlit")
+os.makedirs(os.environ["STREAMLIT_CONFIG_DIR"], exist_ok=True)
+
 import streamlit as st
 
-# ✅ Fix the Hugging Face Spaces crash by disabling usage stats
+# Disable usage stats (good for HF Spaces stability)
 st.set_option("browser.gatherUsageStats", False)
 
 import pandas as pd
@@ -8,9 +14,6 @@ import numpy as np
 import plotly.graph_objects as go
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
-from statsmodels.graphics.tsaplots import plot_acf
-import scipy.stats as stats
-import matplotlib.pyplot as plt
 
 # ------------------------------ Load Data ------------------------------
 df = pd.read_csv("chocolate_sales.csv", parse_dates=["date"])
@@ -143,5 +146,58 @@ with tabs[1]:
     mae = mean_absolute_error(test["sales"], test_forecast_rounded)
     mape = np.mean(np.abs((test["sales"] - test_forecast_rounded) / test["sales"])) * 100
 
-    col1, col2, col
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("R²", f"{r2:.4f}")
+    col2.metric("MSE", f"{mse:.2f}")
+    col3.metric("RMSE", f"{rmse:.2f}")
+    col4.metric("MAE", f"{mae:.2f}")
+    col5.metric("MAPE (%)", f"{mape:.2f}")
 
+    # Show actual vs predicted plot
+    fig_eval = go.Figure()
+    fig_eval.add_trace(go.Scatter(x=test.index, y=test["sales"], mode="lines", name="Actual Sales"))
+    fig_eval.add_trace(go.Scatter(x=test.index, y=test_forecast_rounded, mode="lines", name="Predicted Sales"))
+    fig_eval.update_layout(title="2024 Actual vs Predicted Sales", xaxis_title="Date", yaxis_title="Sales")
+    st.plotly_chart(fig_eval, use_container_width=True)
+
+# ------------------------------ Tab 3: Residual Diagnostics ------------------------------
+with tabs[2]:
+    st.subheader("Residual Diagnostics")
+
+    residuals = test["sales"] - test_forecast_rounded
+
+    # Residual plot
+    fig_residual = go.Figure()
+    fig_residual.add_trace(go.Scatter(x=test.index, y=residuals, mode="markers+lines", name="Residuals"))
+    fig_residual.update_layout(title="Residuals Over Time", xaxis_title="Date", yaxis_title="Residual")
+    st.plotly_chart(fig_residual, use_container_width=True)
+
+    # Histogram and Q-Q plot with matplotlib (show inline)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+    axes[0].hist(residuals, bins=20, color="skyblue", edgecolor="black")
+    axes[0].set_title("Residuals Histogram")
+
+    stats.probplot(residuals, dist="norm", plot=axes[1])
+    axes[1].set_title("Q-Q Plot")
+
+    st.pyplot(fig)
+
+# ------------------------------ Tab 4: Historical Sales Lookup ------------------------------
+with tabs[3]:
+    st.subheader("Lookup Historical Weekly Sales")
+
+    lookup_date = st.date_input(
+        "Select a date to view sales:",
+        min_value=df.index.min().date(),
+        max_value=df.index.max().date(),
+        value=df.index.max().date(),
+        key="lookup_date"
+    )
+    lookup_date = pd.to_datetime(lookup_date)
+
+    if lookup_date not in df.index:
+        st.warning("Date not found in historical sales data.")
+    else:
+        sales_value = df.loc[lookup_date, "sales"]
+        st.metric(f"Sales on {lookup_date.date()}", f"${sales_value:.2f}")

@@ -1,155 +1,272 @@
-import streamlit as st
 import pandas as pd
 import numpy as np
+import streamlit as st
 import plotly.graph_objects as go
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
-import matplotlib.pyplot as plt
 from statsmodels.graphics.tsaplots import plot_acf
 import scipy.stats as stats
+import matplotlib.pyplot as plt
 
-# --- Page config ---
-st.set_page_config(page_title="Chocolate Sales Forecast", layout="wide")
-
-# --- Load data ---
+# ------------------------------ Load Data ------------------------------
 df = pd.read_csv("chocolate_sales.csv", parse_dates=["date"])
 df.set_index("date", inplace=True)
 
-# --- Logo & title ---
+# ------------------------------ Logo and Title ------------------------------
 logo_url = "https://i.imgur.com/oDM4ECC.jpeg"
 col1, col2 = st.columns([1, 8])
 with col1:
     st.image(logo_url, use_container_width=True)
 with col2:
-    st.title("Chocolate Sales Forecast (ARIMA)")
+    st.title("Chocolate Sales Forecast (Optimized ARIMA)")
 
-# --- Train/test split ---
+# ------------------------------ Train/Test Split and Fit ------------------------------
 train = df.iloc[:-52]
-test  = df.iloc[-52:]
+test = df.iloc[-52:]
 order = (2, 0, 2)
 
-# --- Fit ARIMA ---
 with st.spinner(f"Training ARIMA{order}..."):
-    model     = ARIMA(train["sales"], order=order)
+    model = ARIMA(train["sales"], order=order)
     model_fit = model.fit()
 
-# --- Forecast 2025 & 2024 ---
-def make_forecast(model_fit, n_steps, start_date):
-    fcst_res = model_fit.get_forecast(steps=n_steps, alpha=0.10)
-    fcst     = fcst_res.predicted_mean.round(2)
-    ci       = fcst_res.conf_int().round(2)
-    dates    = pd.date_range(start=start_date, periods=n_steps, freq="W-SUN")
-    fcst.index = dates
-    ci.index   = dates
-    return fcst, ci
+# ------------------------------ Forecasts ------------------------------
+forecast_result = model_fit.get_forecast(steps=52, alpha=0.10)
+forecast = forecast_result.predicted_mean
+conf_int = forecast_result.conf_int()
+forecast_dates = pd.date_range(start="2025-01-05", periods=52, freq='W-SUN')
+forecast.index = forecast_dates
+conf_int.index = forecast_dates
+forecast_rounded = forecast.round(2)
+conf_int_rounded = conf_int.round(2)
 
-forecast_2025, ci_2025 = make_forecast(model_fit, 52, start_date="2025-01-05")
-forecast_2024, _      = make_forecast(model_fit, 52, start_date=test.index[0])
-
-# --- Tabs ---
+# ------------------------------ Tabs ------------------------------
 tabs = st.tabs([
-    "2025 Forecast",
-    "2024 Evaluation",
-    "Residuals",
-    "Historical Lookup"
+    "2025 Forecast & Summary",
+    "2024 Model Evaluation",
+    "Residual Diagnostics",
+    "Historical Sales Lookup"
 ])
 
-# Tab 1: 2025 Forecast
+# ------------------------------ Tab 1: Forecast & Summary ------------------------------
 with tabs[0]:
-    st.subheader("2025 Weekly Sales Forecast")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=forecast_2025.index, y=forecast_2025, mode="lines", name="Forecast"))
-    fig.add_trace(go.Scatter(
-        x=list(forecast_2025.index)+list(forecast_2025.index[::-1]),
-        y=list(ci_2025.iloc[:,0])+list(ci_2025.iloc[:,1][::-1]),
-        fill="toself", fillcolor="rgba(0,0,255,0.2)", line=dict(color="rgba(255,255,255,0)"), hoverinfo="skip",
-        name="90% CI"
+    st.subheader("Forecasted Chocolate Sales for 2025")
+
+    # Plotly Forecast Chart
+    fig_forecast = go.Figure()
+    fig_forecast.add_trace(go.Scatter(
+        x=forecast_rounded.index,
+        y=forecast_rounded,
+        mode="lines",
+        name="Forecasted Sales",
+        line=dict(color="blue")
     ))
-    fig.update_layout(xaxis_title="Week", yaxis_title="Sales", hovermode="x unified")
-    st.plotly_chart(fig, use_container_width=True)
+    fig_forecast.add_trace(go.Scatter(
+        x=list(forecast_rounded.index) + list(forecast_rounded.index[::-1]),
+        y=list(conf_int_rounded.iloc[:, 0]) + list(conf_int_rounded.iloc[:, 1][::-1]),
+        fill="toself",
+        fillcolor="rgba(0,0,255,0.2)",
+        line=dict(color="rgba(255,255,255,0)"),
+        hoverinfo="skip",
+        name="90% Confidence Interval"
+    ))
+    fig_forecast.update_layout(
+        title="Projected Chocolate Sales (2025)",
+        xaxis_title="Week",
+        yaxis_title="Sales ($)",
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig_forecast, use_container_width=True)
 
-    st.subheader("Select a Week")
-    sel = st.date_input("Pick a 2025 Sunday:", min_value=forecast_2025.index.min().date(),
-                        max_value=forecast_2025.index.max().date(), value=forecast_2025.index.min().date())
-    sel = pd.to_datetime(sel)
-    if sel in forecast_2025.index:
-        st.metric("Forecast", f"${forecast_2025[sel]:.2f}")
-        lo, hi = ci_2025.loc[sel]
-        st.write(f"90% CI: [${lo:.2f}, ${hi:.2f}]")
+    # Week Selector
+    st.subheader("Select a Week in 2025")
+    selected_date = st.date_input(
+        "Choose a forecast week:",
+        min_value=forecast_rounded.index.min().date(),
+        max_value=forecast_rounded.index.max().date(),
+        value=forecast_rounded.index.min().date(),
+        key="forecast_date"
+    )
+    selected_date = pd.to_datetime(selected_date)
+
+    if selected_date not in forecast_rounded.index:
+        st.warning("Please select a valid forecast week in 2025.")
     else:
-        st.warning("Choose a Sunday in 2025")
+        selected_forecast = forecast_rounded[selected_date]
+        selected_ci = conf_int_rounded.loc[selected_date]
+        st.metric("Forecasted Sales", f"{selected_forecast:.2f}")
+        st.write(f"90% Confidence Interval: **[{selected_ci[0]:.2f}, {selected_ci[1]:.2f}]**")
 
-    st.subheader("2025 Summary")
-    total = forecast_2025.sum(); avg = forecast_2025.mean()
-    mn, mx = forecast_2025.min(), forecast_2025.max()
-    wmin, wmax = forecast_2025.idxmin().date(), forecast_2025.idxmax().date()
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total", f"${total:,.2f}")
-    c2.metric("Average", f"${avg:.2f}")
-    c3.metric("Min", f"${mn:.2f}", f"Week of {wmin}")
-    c4.metric("Max", f"${mx:.2f}", f"Week of {wmax}")
+    # Summary Metrics
+    st.subheader("2025 Forecast Summary")
+    total_sales = forecast_rounded.sum()
+    avg_sales = forecast_rounded.mean()
+    min_sales = forecast_rounded.min()
+    max_sales = forecast_rounded.max()
+    min_week = forecast_rounded.idxmin().date()
+    max_week = forecast_rounded.idxmax().date()
 
-    # download CSV
-    out = pd.DataFrame({
-        "forecast": forecast_2025,
-        "ci_lower": ci_2025.iloc[:, 0],
-        "ci_upper": ci_2025.iloc[:, 1]
-    })
-    st.download_button("Download CSV", out.to_csv().encode(), "forecast_2025.csv")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Forecast Sales", f"{total_sales:,.2f}")
+    col2.metric("Average Weekly Sales", f"{avg_sales:.2f}")
+    col3.metric("Min Weekly Sales", f"{min_sales:.2f}", f"Week of {min_week}")
+    col4.metric("Max Weekly Sales", f"{max_sales:.2f}", f"Week of {max_week}")
 
-# Tab 2: 2024 Evaluation
+    # Download CSV
+    download_df = pd.DataFrame({
+        "date": forecast_rounded.index,
+        "forecasted_sales": forecast_rounded.values,
+        "ci_lower_90": conf_int_rounded.iloc[:, 0].values,
+        "ci_upper_90": conf_int_rounded.iloc[:, 1].values
+    }).set_index("date")
+
+    csv = download_df.to_csv().encode('utf-8')
+    st.download_button("Download 2025 Forecast as CSV", csv, "chocolate_sales_forecast_2025.csv", "text/csv")
+
+# ------------------------------ Tab 2: 2024 Evaluation ------------------------------
 with tabs[1]:
-    st.subheader("2024 Model Evaluation")
-    y_actual = test["sales"]
-    y_pred   = forecast_2024.reindex(test.index)
-    r2    = r2_score(y_actual, y_pred)
-    rmse  = mean_squared_error(y_actual, y_pred, squared=False)
-    mae   = mean_absolute_error(y_actual, y_pred)
-    mape  = np.mean(np.abs((y_actual - y_pred) / y_actual))*100
-    d1, d2, d3, d4 = st.columns(4)
-    d1.metric("R²", f"{r2:.3f}")
-    d2.metric("RMSE", f"${rmse:.2f}")
-    d3.metric("MAE", f"${mae:.2f}")
-    d4.metric("MAPE", f"{mape:.2f}%")
+    st.subheader("Model Performance on 2024 Actual Data")
 
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(x=test.index, y=y_actual, mode="lines", name="Actual"))
-    fig2.add_trace(go.Scatter(x=test.index, y=y_pred, mode="lines", name="Forecast"))
-    fig2.update_layout(xaxis_title="Week", yaxis_title="Sales")
-    st.plotly_chart(fig2, use_container_width=True)
+    test_forecast_result = model_fit.get_forecast(steps=52, alpha=0.10)
+    test_forecast = test_forecast_result.predicted_mean
+    test_conf_int = test_forecast_result.conf_int()
+    test_forecast.index = test.index
+    test_forecast_rounded = test_forecast.round(2)
+    test_conf_int_rounded = test_conf_int.round(2)
 
-# Tab 3: Residuals
+    r2 = r2_score(test["sales"], test_forecast_rounded)
+    mse = mean_squared_error(test["sales"], test_forecast_rounded)
+    rmse = np.sqrt(mse)
+    mae = mean_absolute_error(test["sales"], test_forecast_rounded)
+    mape = np.mean(np.abs((test["sales"] - test_forecast_rounded) / test["sales"])) * 100
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("R²", f"{r2:.3f}")
+    col2.metric("RMSE", f"{rmse:.2f}")
+    col3.metric("MAE", f"{mae:.2f}")
+    col4.metric("MAPE", f"{mape:.2f}%")
+
+    # Plotly Actual vs Forecast
+    fig_eval = go.Figure()
+    fig_eval.add_trace(go.Scatter(
+        x=test.index, y=test["sales"],
+        mode="lines", name="Actual Sales", line=dict(color="black")
+    ))
+    fig_eval.add_trace(go.Scatter(
+        x=test_forecast_rounded.index, y=test_forecast_rounded,
+        mode="lines", name="Forecasted Sales", line=dict(color="blue")
+    ))
+    fig_eval.add_trace(go.Scatter(
+        x=list(test_forecast_rounded.index) + list(test_forecast_rounded.index[::-1]),
+        y=list(test_conf_int_rounded.iloc[:, 0]) + list(test_conf_int_rounded.iloc[:, 1][::-1]),
+        fill="toself",
+        fillcolor="rgba(0,0,255,0.2)",
+        line=dict(color="rgba(255,255,255,0)"),
+        hoverinfo="skip",
+        name="90% Confidence Interval"
+    ))
+    fig_eval.update_layout(
+        title="Forecast vs Actual Sales (2024)",
+        xaxis_title="Week",
+        yaxis_title="Sales ($)",
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig_eval, use_container_width=True)
+
+# ------------------------------ Tab 3: Residual Diagnostics ------------------------------
 with tabs[2]:
     st.subheader("Residual Diagnostics")
-    res = model_fit.resid
-    fig3 = go.Figure()
-    fig3.add_trace(go.Scatter(x=res.index, y=res, mode="lines", name="Residuals"))
-    st.plotly_chart(fig3, use_container_width=True)
+    residuals = model_fit.resid
 
-    fig4, ax4 = plt.subplots()
-    ax4.hist(res, bins=20, edgecolor="k")
-    st.pyplot(fig4)
-    fig5, ax5 = plt.subplots()
-    stats.probplot(res, dist="norm", plot=ax5)
-    st.pyplot(fig5)
-    fig6, ax6 = plt.subplots()
-    plot_acf(res, ax=ax6, lags=40)
-    st.pyplot(fig6)
+    fig_resid = go.Figure()
+    fig_resid.add_trace(go.Scatter(x=train.index, y=residuals, mode="lines", name="Residuals"))
+    fig_resid.update_layout(title="Residuals Over Time", xaxis_title="Date", yaxis_title="Residual")
+    st.plotly_chart(fig_resid, use_container_width=True)
 
-# Tab 4: Historical Lookup
+    st.subheader("Residual Distribution")
+    fig_hist, ax_hist = plt.subplots(figsize=(8, 4))
+    ax_hist.hist(residuals, bins=20, edgecolor="k", alpha=0.7)
+    ax_hist.set_title("Histogram of Residuals")
+    ax_hist.set_xlabel("Residual")
+    ax_hist.set_ylabel("Frequency")
+    st.pyplot(fig_hist)
+
+    fig_qq, ax_qq = plt.subplots(figsize=(6, 6))
+    import scipy.stats as stats
+    stats.probplot(residuals, dist="norm", plot=ax_qq)
+    ax_qq.set_title("Q-Q Plot of Residuals")
+    st.pyplot(fig_qq)
+
+    fig_acf, ax_acf = plt.subplots(figsize=(10, 4))
+    plot_acf(residuals, ax=ax_acf, lags=40)
+    ax_acf.set_title("Autocorrelation (ACF) of Residuals")
+    st.pyplot(fig_acf)
+
+# ------------------------------ Tab 4: Historical Sales ------------------------------
 with tabs[3]:
     st.subheader("Historical Weekly Sales")
-    dd = st.date_input("Select week:", min_value=df.index.min().date(), max_value=df.index.max().date(), value=df.index.max().date())
-    dd = pd.to_datetime(dd)
-    if dd in df.index:
-        st.metric("Sales", f"${df.at[dd,'sales']:.2f}")
-    else:
-        st.warning("Pick a Sunday in the data range")
 
-# Footer
-st.markdown("---")
-st.markdown(
-    "© 2024 The Forecast Company. All Rights Reserved.  "
-    "[Email](mailto:theforecastcompany@gmail.com) | [Call](tel:8563040922)",
-    unsafe_allow_html=True
-)
+    fig_hist_sales = go.Figure()
+    fig_hist_sales.add_trace(go.Scatter(
+        x=df.index,
+        y=df["sales"],
+        mode="lines",
+        name="Historical Sales",
+        line=dict(color="black")
+    ))
+    fig_hist_sales.update_layout(
+        title="All-Time Weekly Chocolate Sales",
+        xaxis_title="Date",
+        yaxis_title="Sales ($)",
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig_hist_sales, use_container_width=True)
+
+    st.subheader("Look Up Actual Sales for a Past Week")
+    historical_date = st.date_input(
+        "Choose a date to view historical sales:",
+        min_value=df.index.min().date(),
+        max_value=df.index.max().date(),
+        value=df.index[-1].date(),
+        key="history_date"
+    )
+    historical_date = pd.to_datetime(historical_date)
+
+    if historical_date not in df.index:
+        st.warning("Selected date is not in the dataset.")
+    else:
+        actual_sales = df.loc[historical_date, "sales"]
+        st.metric("Actual Sales", f"{actual_sales:.2f}")
+
+# ------------------------------ Footer ------------------------------
+st.markdown("""
+<style>
+.footer {
+    position: relative;
+    bottom: 0;
+    width: 100%;
+    background-color: #f0f2f6;
+    padding: 10px 20px;
+    font-size: 0.9em;
+    color: #555555;
+    text-align: center;
+    border-top: 1px solid #d3d3d3;
+    margin-top: 20px;
+}
+.footer a {
+    color: #1a73e8;
+    text-decoration: none;
+    margin: 0 8px;
+}
+.footer a:hover {
+    text-decoration: underline;
+}
+</style>
+
+<div class="footer">
+    &copy; 2024 The Forecast Company. All Rights Reserved.  
+    <br>
+    Contact Us: 
+    <a href="tel:+18563040922">856-304-0922</a> | 
+    <a href="mailto:theforecastcompany@gmail.com">theforecastcompany@gmail.com</a>
+</div>
+""", unsafe_allow_html=True)
